@@ -1,0 +1,191 @@
+//data sorting application
+'use strict';
+require('dotenv').config();
+const natural = require('natural');
+const stemmer = natural.PorterStemmer;
+var mysql = require('mysql');
+const express = require('express');
+const bodyParser = require('body-parser');
+const sentenceTokenizer = new natural.SentenceTokenizer();
+const wordTokenizer = new natural.WordPunctTokenizer();
+const app = express().use(bodyParser.json()); // creates http server
+const axios = require('axios');
+const env = process.env;
+var token = env.TOKEN;
+
+// start the webhook
+app.listen(3052, () => console.log(`[SUCCESS] [Ardi PROCESS ${env.VER}] Webhook is listening`));
+
+//l1db01 mySQL
+var writePool = mysql.createPool({
+    host: env.SQL_HOST,
+    user: env.ARDI_USER,
+    password: env.ARDI_PW,
+    database: env.ARDI_DB
+});
+  
+app.get('/', (req, res) => {
+    // check if verification token is correct
+    if (req.query.token !== token) {
+        return res.sendStatus(401);
+    } 
+    // return challenge
+    return res.end(req.query.challenge);
+});
+
+app.post('/', (req, res) => {
+    // check if verification token is correct
+    if (req.query.token !== token) {
+        console.log(req.query);
+        console.log('401');
+        return res.sendStatus(401);
+    }
+    
+    var sentence = req.body.headers.text;
+    var uuid = req.body.headers.id;
+    var words = [];
+    var sentToken = [];
+    sentToken = sentenceTokenizer.tokenize(sentence);
+    console.log(sentToken);
+    words = wordTokenizer.tokenize(sentence);
+    var stemArr = [];
+    for (var i=0; words.length>i;i++){
+        stemArr.push(stemmer.stem(words[i]))
+        
+    }
+    console.log(stemArr);
+
+    
+    var sqlClass = "SELECT class FROM `input` WHERE verified='1' GROUP BY class";
+    sqlQuery(sqlClass, async function(err, results){
+        if (err) console.error(err);
+        var count=[];
+        for (var i=0;results.length>i;i++){
+            var numb = await getCount(results[i].class, 'class', stemArr, false)
+            count[results[i].class] = numb;
+        }
+        var storeClass = Object.keys(count).reduce((a, b) => count[a] > count[b] ? a : b);
+        if (env.CONSOLE_LOG){ console.log(`[SUCCESS] > message Class: ${storeClass}`) }
+        var sql = "UPDATE input SET verified=0, class='" + storeClass + "', class_rating='" + count[storeClass] + "' WHERE uuid='" + uuid + "'"
+        sqlStore(sql);
+        
+    })
+    var sqlEmotion = "SELECT emotion FROM `input` WHERE verified='1' GROUP BY emotion";
+    sqlQuery(sqlEmotion, async function(err, results){
+        if (err) console.error(err);
+        var count=[];
+        for (var i=0;results.length>i;i++){
+            var numb = await getCount(results[i].emotion, 'emotion', stemArr, false)
+            count[results[i].emotion] = numb;
+        }
+        var storeEmotion = Object.keys(count).reduce((a, b) => count[a] > count[b] ? a : b);
+        if (env.CONSOLE_LOG){ console.log(`[SUCCESS] > message Emotion: ${storeEmotion}`) }
+        var sql = "UPDATE input SET verified=0, emotion='" + storeEmotion + "', emotion_rating='" + count[storeEmotion] + "' WHERE uuid='" + uuid + "'"
+        sqlStore(sql);
+        
+    })
+    var targetuser = "SELECT target FROM `input` WHERE verified='1' GROUP BY target";
+    sqlQuery(targetuser, async function(err, results){
+        if (err) console.error(err);
+        var count=[];
+        for (var i=0;results.length>i;i++){
+            var numb = await getCount(results[i].target, 'target', stemArr, true)
+            count[results[i].target] = numb;
+        }
+        var storTarget = Object.keys(count).reduce((a, b) => count[a] > count[b] ? a : b);
+        if (env.CONSOLE_LOG){ console.log(`[SUCCESS] > message Target: ${storTarget}`) }
+        var sql = "UPDATE input SET verified=0, target='" + storTarget + "', target_rating='" + count[storTarget] + "' WHERE uuid='" + uuid + "'"
+        sqlStore(sql);
+        
+    })
+
+// return a text response
+    const data = {
+        responses: [
+        {
+            type: 'text',
+            elements: ['Status', 'Received']
+        }]
+    };
+
+    res.json(data);
+});
+
+//function to store sql information
+
+
+function getCount(className, dataType, stemArr, target){
+    //for (var i=0;results.length>i;i++)
+    return new Promise((resolve, reject) => {
+        if (target){
+            var sql = "SELECT data, uuid, class from `input` WHERE " + dataType + "='" + className + "' AND verified=1 AND class='question' LIMIT 1000";
+        } else{
+            var sql = "SELECT data, uuid, class from `input` WHERE " + dataType + "='" + className + "' AND verified=1 LIMIT 1000";
+        }
+        
+        var cnt=0;
+        sqlQuery(sql, function(err, results){     
+            if (err) return reject(err);
+            for (var i=0;results.length>i;i++){
+                var verArr =[];
+                verArr = wordTokenizer.tokenize(results[i].data);
+                for (var x=0;verArr.length>x;x++){
+                    var testStemArr =[];
+                    testStemArr = stemmer.stem(verArr[x])
+                    if (stemArr.includes(testStemArr)){
+                        cnt++;                                    
+                    }
+                }
+            }
+            return resolve(cnt);
+        })
+    })
+    
+}
+
+
+
+//function to store sql information
+function sqlStore(sql){
+    writePool.getConnection(function(err, connection) {
+        connection.query(sql, function(err){
+            if (err) throw err;
+        });
+        connection.release();
+    })
+}
+
+//sql function with callback options for sql queries.
+function sqlQuery(sql, callback) {
+    writePool.getConnection((err, connection) => {
+        if (err) {
+            console.log(err);
+            connection.release();
+            callback(err.code, null);
+        }
+        connection.query(sql, (err, results) => {
+            connection.release();
+            if (!err) {
+                callback(null, results);
+            }
+            else {
+                callback(err.code, null);
+            }
+        });
+    });
+}
+
+//API call to the logic app to notify it a decision needs to be made, including the hash, uuid and options
+function notify(uuid, options, hash){
+    axios.post(process.env.LOGIC + token, {
+        headers: {
+        action: "choose",
+        id: uuid,
+        data: { options },
+        did: hash
+        }
+    })
+    .catch(error => {
+        console.error(error)
+    });
+}

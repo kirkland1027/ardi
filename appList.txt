@@ -1,0 +1,5 @@
+C:\Users\kirkl\Documents\ardi\discord\.env
+C:\Users\kirkl\Documents\ardi\sort\.env
+C:\Users\kirkl\Documents\ardi\classify\.env
+C:\Users\kirkl\Documents\ardi\process\.env
+C:\Users\kirkl\Documents\ardi\respond\.env

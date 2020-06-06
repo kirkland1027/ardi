@@ -1,36 +1,42 @@
 //data sorting application
 'use strict';
 require('dotenv').config();
-var redis = require('redis');
+const redis = require('redis');
 const natural = require('natural');
-var http = require("http");
-const stemmer = natural.PorterStemmer;
-var mysql = require('mysql');
+const mysql = require('mysql');
 const express = require('express');
 const bodyParser = require('body-parser');
+const axios = require('axios');
+let RuleEngine = require('json-rules-engine');
+let engine = new RuleEngine.Engine();
+const stemmer = natural.PorterStemmer;
 const sentenceTokenizer = new natural.SentenceTokenizer();
 const wordTokenizer = new natural.WordTokenizer();
 const app = express().use(bodyParser.json()); // creates http server
-const axios = require('axios');
-var NGrams = natural.NGrams;
 const env = process.env;
+var NGrams = natural.NGrams;
 var token = env.TOKEN;
-
 var client = redis.createClient(6379, env.REDIS); //creates a new client
-//var messages = redis.createClient(6379, env.REDIS); //creates a new client
 
 client.on('connect', function(){
     console.log(`[SUCCESS] > Reddis Connected: ${process.env.REDIS}`);
     console.log(`[SUCCESS] > SQL DB: ${process.env.ARDI_DB}`);
+
+    //load rules
+    client.smembers('rules', function(err, results){
+        if (err) console.error(err);
+        for (var ri=0;results.length>ri;ri++){
+            client.get(results[ri], function(err, result){
+                //var rule = result.toJSON();
+                let rule = new RuleEngine.Rule(result);
+                engine.addRule(rule);
+            })
+        }
+    })
 });
-
-
-const language = "EN"
-const defaultCategory = 'N';
-const defaultCategoryCapitalized = 'NNP';
-
 // start the webhook
 app.listen(3053, () => console.log(`[SUCCESS] [Ardi PROCESS ${env.VER}] Webhook is listening`));
+
 
 //l1db01 mySQL
 var sqlPool = mysql.createPool({
@@ -58,19 +64,8 @@ app.post('/', (req, res) => {
     }
 
     var uuid = req.body.headers.id;
-    client.hgetall(uuid, async function(err, results){
-        var codes = results.code.split(',');
-        //checking if we should respond to this.
-        if (codes.includes('T')){
-            var resp_tgt = await respondTarget(uuid);
-        }
-        
-        if (codes.includes('P') || resp_tgt === true){
-            //send basic responce
-            var reply = await respond(codes, uuid);
-            notify(reply, results.cid);
-        }
-    })
+    beginRespond(uuid);
+    
 
 // return a text response
     const data = {
@@ -84,13 +79,26 @@ app.post('/', (req, res) => {
     res.json(data);
 });
 
-//function to store sql information
-
-
-
-
-
-
+function beginRespond(uuid){
+    client.hgetall(uuid, async function(err, results){
+        var codes = results.code.split(',');
+        //checking if we should respond to this.
+        if (codes.includes('T')){
+            var resp_tgt = await respondTarget(uuid);
+            if (resp_tgt) codes.push('XJ');
+        }
+        var facts = { code: codes, id: results.cid };
+        engine.run(facts).then(function(success){
+            success.events.forEach(async (item) => {
+                var action = item.params.action;
+                var reply = await respond(codes, uuid, action);
+                notify(reply, results.cid)
+            })
+             
+        })
+         
+    })
+}
 
 //function to store sql information
 function sqlStore(sql){
@@ -138,7 +146,6 @@ function notify(response, channel){
 
 //function to determine if we should respond. 
 function respondTarget(uuid){
-    //for (var i=0;results.length>i;i++)
     return new Promise((resolve, reject) => {
         client.smembers('response_targets', function(err, results){
             if (err) console.error(err);
@@ -158,35 +165,37 @@ function respondTarget(uuid){
 }
 
 //building a response
-function respond(codes, uuid){
+function respond(codes, uuid, action){
     return new Promise(async (resolve, reject) => {
         var respArr = [];
-        if (codes.includes('Q') || codes.includes('S')){
-            // var rsCode = ['self', 'PS'];
-            var rsCode = ['self', 'S', 'RQ', 'ST'];
+        if (codes.includes('Q')){
+            var rsCode = ['self', 'PS'];
+            var rsCode = ['self', 'S', 'Q', 'ST'];
             for (var i=0;rsCode.length>i;i++){
                 if (rsCode[i] === 'S'){
                     var status = await getStatus();
                     if (status === true){
-                        var word = await getWords('PS');
+                        var word = await getWords('PR');
                         respArr.push(word);
-                        console.log('word', word)
                     }
                     else{
                         var word = await getWords('NS');
-                        respArr.push(word);
+                        //respArr.push(word);
                     }
                 } else{
                     var word = await getWords(rsCode[i]);
                     respArr.push(word);
-                }
-                
-                
+                }            
             }
-            console.log(respArr)
             var respStr = respArr.join(' ');
             return resolve(respStr);
         }
+    })
+}
+
+function buildResponce(rCode){
+    return new Promise (async (resolve, reject)=>{
+        var sql = "SELECT ";
     })
 }
 

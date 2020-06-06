@@ -1,0 +1,30 @@
+-
+
+mixin colors
+  | the phone's available #[+syn('colors')]
+  | are
+  eachz color in phone.colors with { separator:',', last_separator:'and', end:'.' }
+    | #{color}
+
+
+mixin display
+  itemz { begin_with_general: 'the display has', separator:',', last_separator:'and', mix:true }
+    item
+      | a physical size of #[+value(phone.displaySize)] inches
+    item
+      | a screen-to-body ratio of #[+value(phone.screenRatio)] %
+
+
+mixin intro
+  synz
+    syn
+      | the #{phone.name} is really a fantastic phone.
+    syn
+      | i really love the new #{phone.name}.
+    syn
+      | #{phone.name} : a great phone !
+
+
+
+
+p #[+intro] . #[+colors] . #[+display]

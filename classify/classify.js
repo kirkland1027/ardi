@@ -15,12 +15,21 @@ var NGrams = natural.NGrams;
 const env = process.env;
 var token = env.TOKEN;
 
+var respRslt;
+
 var client = redis.createClient(6379, env.REDIS); //creates a new client
 //var messages = redis.createClient(6379, env.REDIS); //creates a new client
 
 client.on('connect', function(){
     console.log(`[SUCCESS] > Reddis Connected: ${process.env.REDIS}`);
     console.log(`[SUCCESS] > SQL DB: ${process.env.ARDI_DB}`);
+});
+
+var sqlPool = mysql.createPool({
+    host: env.SQL_HOST,
+    user: env.ARDI_USER,
+    password: env.ARDI_PW,
+    database: env.ARDI_DB
 });
 
 
@@ -63,16 +72,27 @@ app.post('/', (req, res) => {
     sentToken = sentenceTokenizer.tokenize(sentence);
     
     words = wordTokenizer.tokenize(sentence);
-    var stemArr = [];
-    for (var i=0; words.length>i;i++){
-        stemArr.push(stemmer.stem(words[i]))
-        
-    }
-    //console.log(stemArr);
     var lexicon = new natural.Lexicon(language, defaultCategory, defaultCategoryCapitalized);
     var ruleSet = new natural.RuleSet('EN');
     var tagger = new natural.BrillPOSTagger(lexicon, ruleSet);
-    //console.log(tagger.tag(words));   
+    var twords = tagger.tag(words);
+    var taggedWords = twords.taggedWords;
+    var posTags = [];
+    var tagWords = [];
+    for (var xl=0;taggedWords.length>xl;xl++){
+        var sql = "INSERT INTO pos (tag, word, pos, uuid) VALUES ('" + taggedWords[xl].tag + "', '" + taggedWords[xl].token + "', '" + xl + "', '" + uuid + "')"
+        sqlStore(sql);
+        posTags.push(taggedWords[xl].tag);
+        tagWords.push(taggedWords[xl].token);
+    }
+    var posString = posTags.join(',');
+    var wordString = tagWords.join(',');
+    var posSql = "UPDATE lang SET pos='" + posString + "' WHERE uuid='" + uuid + "'";
+    sqlStore(posSql);
+    client.hset(uuid, 'pos', posString.toString());
+    client.hset(uuid, 'words', wordString.toString());
+    client.expire(uuid, 600);
+    if (env.CONSOLE_LOG){ console.log(`[SUCCESS] > message POS: ${posString.toString()}`) }
     
     //getting the members of the "class list type from redis"
     client.smembers('codes', async function(err, results){
@@ -81,7 +101,7 @@ app.post('/', (req, res) => {
         var codes=[];
         for (var i=0;results.length>i;i++){
             //sending classification types for results
-            var rst = await getReddisCount(results[i], stemArr, sentence);          
+            var rst = await getReddisCount(results[i], sentence);         
             if (rst !== null){
                 for (var jh=0;rst.length>jh;jh++){
                     var sqlKey = "INSERT INTO codes (code, data, uuid) VALUES ('" + results[i] + "', '" + rst[jh] + "', '" + uuid + "')";
@@ -99,6 +119,46 @@ app.post('/', (req, res) => {
         client.hset(uuid, 'code', code.toString());
         client.expire(uuid, 600);
         if (env.CONSOLE_LOG){ console.log(`[SUCCESS] > message CODE: ${code}`) }
+        if (code.includes('Q')){ //if the input is a question, store the string as a question.
+            var sqlQ = "INSERT INTO q (data, pos, length) VALUES ('" + sentence + "', '" + posString + "', '" + codes.length + "')";
+            sqlStore(sqlQ);
+            processNotify(uuid, 'Q');
+            var sqlPos = "SELECT * from pos WHERE uuid='" + uuid + "'";
+            sqlQuery(sqlPos, function(err, results){
+                if (err) console.error(err);
+                for (var xi=0;results.length>xi;xi++){
+                    var sqlQcode = "UPDATE pos SET code='Q' WHERE id='" + results[xi].id +"'";
+                    sqlStore(sqlQcode);
+                }
+            }) 
+        }
+        if(code.includes('PR')){
+            var sqlQ = "INSERT INTO pr (data, pos, length) VALUES ('" + sentence + "', '" + posString + "', '" + codes.length + "')";
+            sqlStore(sqlQ);
+            processNotify(uuid, 'PR');
+            var sqlPos = "SELECT * from pos WHERE uuid='" + uuid + "'";
+            sqlQuery(sqlPos, function(err, results){
+                if (err) console.error(err);
+                for (var xi=0;results.length>xi;xi++){
+                    var sqlQcode = "UPDATE pos SET code='PR' WHERE id='" + results[xi].id +"'";
+                    sqlStore(sqlQcode);
+                }
+            })
+        }
+        if(code.includes('NR')){
+            var sqlQ = "INSERT INTO nr (data, pos, length) VALUES ('" + sentence + "', '" + posString + "', '" + codes.length + "')";
+            sqlStore(sqlQ);
+            processNotify(uuid, 'NR');
+            var sqlPos = "SELECT * from pos WHERE uuid='" + uuid + "'";
+            sqlQuery(sqlPos, function(err, results){
+                if (err) console.error(err);
+                for (var xi=0;results.length>xi;xi++){
+                    var sqlQcode = "UPDATE pos SET code='NR' WHERE id='" + results[xi].id +"'";
+                    sqlStore(sqlQcode);
+                }
+            })
+        }
+
     });
 
 // return a text response
@@ -117,61 +177,38 @@ app.post('/', (req, res) => {
 
 
 
-function getReddisCount(className, stemArr, sentence){
-    //for (var i=0;results.length>i;i++)
+function getReddisCount(className, sentence){
     return new Promise((resolve, reject) => {
-        //var cnt=0;
-        //var holdStr = stemArr.join(' ');
         client.lrange(className, 0, -1, function(err, results){
-            var xhold =[];
-            var vhold = [];
+            var vhold = []; //array of responces
+             //array of classnames
             for (var i=0;results.length>i;i++){
-                //console.log(className)
                 var verArr =[];
-                verArr = wordTokenizer.tokenize(results[i]);
-                var nGrm = NGrams.ngrams(sentence, verArr.length)        
+                verArr = wordTokenizer.tokenize(results[i]); //count number of words in target classification
+                var nGrm = NGrams.ngrams(sentence, verArr.length); //splitting sentence into chunks based on target classication
                 for (var xk=0;nGrm.length>xk;xk++){;
-                    var sent = nGrm[xk].join(' ');
-                    //console.log(sent, ':', results[i]);
-                    var resp = natural.LevenshteinDistance(sent.toLowerCase(), results[i].toLowerCase(), {search: true});
-                    var strDist = natural.JaroWinklerDistance(sent.toLowerCase(), results[i].toLowerCase());
-                    //console.log(resp)
+                    var sent = nGrm[xk].join(' '); //creating a "sentence string" from ngram target
+                    var resp = natural.LevenshteinDistance(sent.toLowerCase(), results[i].toLowerCase(), {search: true}); //determining how close target and source strings are
+                    var strDist = natural.JaroWinklerDistance(sent.toLowerCase(), results[i].toLowerCase()); //secondary method to determinate relationship of strings        
                     if ((resp.distance < 2 && resp.offset < 1) && strDist > 0.949){
                         if (env.VERB_LOG === 'True'){ console.log('[ALERT] >', className, strDist, sent, ' : ', results[i]) }
-
-                        if (xhold[className] !== undefined){
-                            console.log('here')
-                            var wordCnt = wordTokenizer.tokenize(xhold[className]);
-                            var newCnt = wordTokenizer.tokenize(resp.substring);
-                            var stringCnt = [];
-                            stringCnt[xhold[className]] = wordCnt.length;
-                            stringCnt[resp.substring] = newCnt.length;
-                            var storeTot = Object.keys(stringCnt).reduce((a, b) => stringCnt[a] > stringCnt[b] ? a : b);
-                            if (!vhold.includes(resp.substring)){
-                                xhold.push(className);
-                                vhold.push(resp.substring);
-                            } 
-                        } 
-                        else {
-                            xhold.push(className);
-                            vhold.push(resp.substring);
-                        }
+                        vhold.push(resp.substring); //pushing matched classification into array
                     }
-                }           
+                    if (className === 'PR' || className === 'NR'){
+                        respRslt = strDist;
+                    }
+                }
             }
-            if (xhold[0] === undefined || vhold[0] === undefined){
+            if (vhold[0] === undefined){
                 return resolve(null);
             }
             else {
-                var zhold = [{xhold}, {vhold}]
-                return resolve(vhold);
+                return resolve(vhold); //returning matched classifications
             }
         })
     })
     
 }
-
-
 
 //function to store sql information
 function sqlStore(sql){
@@ -185,7 +222,7 @@ function sqlStore(sql){
 
 //API call to the logic app to notify it a decision needs to be made, including the hash, uuid and options
 function notify(uuid, sentence, code){
-    axios.post(process.env.PROCESS + token, {
+    axios.post(process.env.RESPOND + token, {
         headers: {
         id: uuid,
         text: sentence,
@@ -195,4 +232,35 @@ function notify(uuid, sentence, code){
     .catch(error => {
         console.error(error)
     });
+}
+
+function processNotify(uuid, className){
+    axios.post(process.env.PROCESS + token, {
+        headers: {
+        id: uuid,
+        did: className
+        }
+    })
+    .catch(error => {
+        console.error(error)
+    });
+}
+
+function sqlQuery(sql, callback) {
+    sqlPool.getConnection((err, connection) => {
+      if (err) {
+          console.log(err);
+          connection.release();
+          callback(err.code, null);
+      }
+      connection.query(sql,  (err, results) => {
+          connection.release();
+          if (!err) {
+              callback(null, results);
+          }
+          else {
+              callback(err.code, null);
+          }
+      });
+  });
 }

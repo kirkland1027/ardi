@@ -11,6 +11,6 @@ COPY * /usr/src/app/
 RUN npm install
 
 # Inform Docker that the container is listening on the specified port at runtime.
-EXPOSE 3054
+EXPOSE 3053
 
 # Run the specified command within the container.

@@ -14,8 +14,6 @@
     "body-parser": "^1.19.0",
     "dotenv": "^8.2.0",
     "express": "^4.17.1",
-    "fastify": "^2.14.1",
-    "json-rules-engine": "^5.0.3",
     "mysql": "^2.18.1",
     "natural": "^2.1.5",
     "redis": "^3.0.2",

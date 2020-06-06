@@ -66,7 +66,7 @@ services:
       replicas: 2
     image: harbor.ivv.io:80/ardi/process:latest
     ports:
-      - "3053-3053"
+      - "3054-3054"
     command: ["./wait-for-it.sh", "ardi_redis:6379", "--", "node", "process.js"]
     healthcheck:
         test: ["CMD", "node", "./healthcheck.js"]

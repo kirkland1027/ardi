@@ -21,8 +21,7 @@ var client = redis.createClient(6379, env.REDIS); //creates a new client
 client.on('connect', function(){
     console.log(`[SUCCESS] > Reddis Connected: ${process.env.REDIS}`);
     console.log(`[SUCCESS] > SQL DB: ${process.env.ARDI_DB}`);
-
-    //load rules
+    //load rules for responding
     client.smembers('rules', function(err, results){
         if (err) console.error(err);
         for (var ri=0;results.length>ri;ri++){
@@ -90,13 +89,113 @@ function beginRespond(uuid){
         var facts = { code: codes, id: results.cid };
         engine.run(facts).then(function(success){
             success.events.forEach(async (item) => {
+                var statusCheck = false;
+                if (item.type === 'respond-Status') statusCheck = true;
                 var action = item.params.action;
-                var reply = await respond(codes, uuid, action);
-                notify(reply, results.cid)
+                var rply = await buildResponce(action, statusCheck);
+                notify(rply, results.cid)
             })
              
         })
          
+    })
+}
+
+//notify discord app of response. 
+function notify(response, channel){
+    axios.post(process.env.DISCORD + token, {
+        headers: {
+        action: "reply",
+        data: response,
+        target: channel
+        }
+    })
+    .catch(error => {
+        console.error(error)
+    });
+}
+
+//function to determine if we should respond. 
+function respondTarget(uuid){
+    return new Promise((resolve, reject) => {
+        client.smembers('response_targets', function(err, results){
+            if (err) console.error(err);
+            var sql = "SELECT data FROM codes WHERE code='T' AND uuid='" + uuid + "'";
+            sqlQuery(sql, function(err, responces){
+                if (err) console.error(err);
+                for (var i=0;responces.length>i;i++){
+                    if (results.includes(responces[i].data)){
+                        return resolve(true);
+                    }
+                }
+                return resolve(false);
+            })
+        })
+    })
+    
+}
+
+
+function buildResponce(rCode, statusCheck){
+    return new Promise (async (resolve, reject)=>{
+        if (statusCheck) {
+            var getStatusRslt = await getStatus();
+                if (getStatusRslt){
+                    var sql = "SELECT top_pos FROM code_stats WHERE code='" + rCode + "'"
+                } else {
+                    var sql = "SELECT top_pos FROM code_stats WHERE code='NR'"
+                    rCode = 'NR'
+                }
+        } else{
+            var sql = "SELECT top_pos FROM code_stats WHERE code='" + rCode + "'";
+        }
+        var reply = [];
+        sqlQuery(sql, async function(err, results){
+            if (err) console.error(err);
+            if (results !== null && results[0] !== undefined){
+                var pos = results[0].top_pos;
+                var posArr = pos.split(',');
+                for (var xg=0;posArr.length>xg;xg++){
+
+                    var wrd = await getRspWord(rCode, posArr[xg], xg);
+                    if (wrd !== null) reply.push(wrd);
+                }
+                var respStr = reply.join(' ');
+                return resolve(respStr);
+            }
+            else { return resolve(null) }
+        })
+    })
+}
+
+function getRspWord(rCode, pos, xg){
+    return new Promise((resolve, reject) => {
+        var posSql = "SELECT word, pos, pos_position, pos_occurance FROM pos_stats WHERE code='" + rCode + "' AND pos='" + pos + "' AND pos_position='" + xg + "' ORDER BY pos_occurance DESC LIMIT 1"
+        sqlQuery(posSql, function(err, result){
+            if (err) console.err(err);
+            if (result !== null && result[0] !== undefined) return resolve(result[0].word)
+            return resolve(null);
+        })
+    })
+}
+
+async function getStatus(){
+    return new Promise(async (resolve, reject) => {
+        var discord = await axios.get(process.env.DISCORD + process.env.TOKEN);
+        var sort = await axios.get(process.env.SORT + process.env.TOKEN);
+        var classify = await axios.get(process.env.CLASSIFY + process.env.TOKEN);
+        try {
+            var processApp = await axios.get(process.env.PROCESS + process.env.TOKEN);
+        }
+        catch(error){
+            console.error('[ERROR] > ARDI PROCESS IS OFFLINE!');
+            var processApp = [];
+            processApp['status'] = 401;
+        }
+        console.log('DISCORD:', discord.status, 'SORT:', sort.status, 'CLASSIFY:', classify.status, 'PROCESS:', processApp.status);
+        if (discord.status === 200 && sort.status === 200 && classify.status === 200 && processApp.status === 200){
+            return resolve(true);
+        } else{ return resolve(false); }
     })
 }
 
@@ -127,104 +226,5 @@ function sqlQuery(sql, callback) {
           }
       });
   });
-}
-
-//notify discord app of response. 
-function notify(response, channel){
-    axios.post(process.env.DISCORD + token, {
-        headers: {
-        action: "reply",
-        data: response,
-        target: channel
-        }
-    })
-    .catch(error => {
-        console.error(error)
-    });
-    
-}
-
-//function to determine if we should respond. 
-function respondTarget(uuid){
-    return new Promise((resolve, reject) => {
-        client.smembers('response_targets', function(err, results){
-            if (err) console.error(err);
-            var sql = "SELECT data FROM codes WHERE code='T' AND uuid='" + uuid + "'";
-            sqlQuery(sql, function(err, responces){
-                if (err) console.error(err);
-                for (var i=0;responces.length>i;i++){
-                    if (results.includes(responces[i].data)){
-                        return resolve(true);
-                    }
-                }
-                return resolve(false);
-            })
-        })
-    })
-    
-}
-
-//building a response
-function respond(codes, uuid, action){
-    return new Promise(async (resolve, reject) => {
-        var respArr = [];
-        if (codes.includes('Q')){
-            var rsCode = ['self', 'PS'];
-            var rsCode = ['self', 'S', 'Q', 'ST'];
-            for (var i=0;rsCode.length>i;i++){
-                if (rsCode[i] === 'S'){
-                    var status = await getStatus();
-                    if (status === true){
-                        var word = await getWords('PR');
-                        respArr.push(word);
-                    }
-                    else{
-                        var word = await getWords('NS');
-                        //respArr.push(word);
-                    }
-                } else{
-                    var word = await getWords(rsCode[i]);
-                    respArr.push(word);
-                }            
-            }
-            var respStr = respArr.join(' ');
-            return resolve(respStr);
-        }
-    })
-}
-
-function buildResponce(rCode){
-    return new Promise (async (resolve, reject)=>{
-        var sql = "SELECT ";
-    })
-}
-
-//getting the words for the response
-function getWords(id){
-    return new Promise((resolve, reject) => {
-        client.lrange(id, 0, -1, function(err, results){
-            if (results.length>1){
-                for (var i=0;results.length>i;i++){
-                    return resolve(results[0])
-                }
-            }
-            else{
-                return resolve(results);
-            }
-        })
-
-    })
-}
-
-async function getStatus(){
-    return new Promise(async (resolve, reject) => {
-        var discord = await axios.get(process.env.DISCORD + process.env.TOKEN);
-        var sort = await axios.get(process.env.SORT + process.env.TOKEN);
-        var classify = await axios.get(process.env.CLASSIFY + process.env.TOKEN);
-        console.log('DISCORD:', discord.status, 'SORT:', sort.status, 'CLASSIFY:', classify.status);
-        if (discord.status === 200 && sort.status === 200 && classify.status === 200){
-            return resolve(true);
-        } else{ return resolve(false); }
-    })
 }
 

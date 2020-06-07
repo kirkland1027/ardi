@@ -47,8 +47,9 @@ app.post('/', (req, res) => {
 
     var sqlTable = req.body.headers.did;
     var uuid = req.body.headers.id;
-    processPosPositionData(sqlTable, uuid);
-    processCodeData(sqlTable, uuid);
+    var tableCode = req.body.headers.codes;
+    processPosPositionData(tableCode, uuid);
+    
 
 
 // return a text response
@@ -65,26 +66,10 @@ app.post('/', (req, res) => {
 
 //function to store sql information
 
-async function processCodeData(table, uuid){
-  var tbl = table.toLowerCase()
-  var lgn = await getAvgLength(tbl);
-  var topPos = await getCodeTopPOS(tbl);
-  
-  var codeStatExists = await getCodeExists(tbl);
-  if (!codeStatExists){
-    console.log('[INFO] [NEW] > Top POS:', topPos, 'Average Lgenth:', lgn);
-    var sql = "INSERT INTO code_stats (code, top_pos, avg_length) VALUES ('" + tbl + "', '" + topPos + "', '" + lgn + "')";
-    sqlStore(sql);
-  }
-  else {
-    console.log('[INFO] [UPDATE] > Top POS:', topPos, 'Average Lgenth:', lgn);
-    var sql = "UPDATE code_stats SET top_pos='" + topPos + "', avg_length='" + lgn + "' WHERE code='" + tbl + "'";
-    sqlStore(sql);
-  }
-}
+
 
 async function processPosPositionData(table, uuid){
-  var tbl = table.toLowerCase();
+  var tbl = table;
   var posCode = await getPosCode(uuid);
   var posWords = await getPosWords(uuid);
   var wordsArr = posWords.split(',');
@@ -98,6 +83,7 @@ async function processPosPositionData(table, uuid){
     }
   }
   updatePositionOccurance();
+  processCodeData(table, uuid);
 }
 
 function getPosCode(uuid){
@@ -110,6 +96,24 @@ function getPosCode(uuid){
     })
   })
 }
+
+async function processCodeData(table, uuid){
+  var lgn = await getAvgLength(table);
+  var topPos = await getCodeTopPOS(table);
+  
+  var codeStatExists = await getCodeExists(table);
+  if (!codeStatExists){
+    console.log('[INFO] [NEW] > Top POS:', topPos, 'Average Lgenth:', lgn);
+    var sql = "INSERT INTO code_stats (code, top_pos, avg_length) VALUES ('" + table + "', '" + topPos + "', '" + lgn + "')";
+    sqlStore(sql);
+  }
+  else {
+    console.log('[INFO] [UPDATE] > Top POS:', topPos, 'Average Lgenth:', lgn);
+    var sql = "UPDATE code_stats SET top_pos='" + topPos + "', avg_length='" + lgn + "' WHERE code='" + table + "'";
+    sqlStore(sql);
+  }
+}
+
 function getPosWords(uuid){
   return new Promise((resolve, reject) => {
     client.hgetall(uuid, function(err, results){
@@ -124,7 +128,6 @@ function getPosWords(uuid){
 function getPosStats(tbl, pos, posNum, word){
   return new Promise((resolve, reject) => {
     var sql = "SELECT * FROM pos_stats WHERE code='" + tbl + "' AND pos='" + pos + "' AND pos_position='" + posNum + "' AND word='" + word + "'";
-
     readSqlQuery(sql, function(err, results){
       if (err) console.error(err);
       if (results !== null && results[0] !== undefined) return resolve(true);
@@ -135,7 +138,7 @@ function getPosStats(tbl, pos, posNum, word){
 
 function getPosOccuranceStats(tbl, pos, j, word){
   return new Promise((resolve, reject) => {
-    var sql = "SELECT * FROM " + tbl + " ORDER BY id DESC";
+    var sql = "SELECT * FROM coding WHERE code='" + tbl + "' ORDER BY id DESC";
     readSqlQuery(sql, function(err, results){
       if (err) console.error(err);
       var count = 0;
@@ -168,7 +171,7 @@ function getCodeExists(table){
 
 function getCodeTopPOS(table){
   return new Promise((resolve, reject) => {
-    var sql = "SELECT pos, COUNT(*) FROM " + table + " GROUP BY pos ORDER BY COUNT(*) DESC LIMIT 1"
+    var sql = "SELECT pos, COUNT(*) FROM coding WHERE code='" + table + "' GROUP BY pos ORDER BY COUNT(*) DESC LIMIT 1"
     readSqlQuery(sql, function(err, result){
       if (err) console.error(err);
       if (result !== null && result[0] !== undefined) return resolve(result[0].pos);
@@ -179,7 +182,7 @@ function getCodeTopPOS(table){
 
 function getAvgLength(table){
   return new Promise((resolve, reject) =>{
-    var sql = "SELECT ROUND(AVG(length),0) AS average FROM " + table;
+    var sql = "SELECT ROUND(AVG(length),0) AS average FROM coding WHERE code='" + table + "'";
     readSqlQuery(sql, function(err, result){
       if (err) console.error(err);
       if (result !== null && result[0] !== undefined) return resolve(result[0].average)
@@ -204,11 +207,10 @@ function updatePositionOccurance(){
     if (err) console.error(err);
     for (var ij=0;results.length>ij;ij++){
       var tblCode = results[ij].code;
-      var tbl = tblCode.toLowerCase();
       var pos = results[ij].pos.toString();
       var posPost = Number(results[ij].pos_position);
       var word = results[ij].word;
-      var rslt = await getPosOccuranceStats(tbl, pos, posPost, word);
+      var rslt = await getPosOccuranceStats(tblCode, pos, posPost, word);
       console.log('[INFO] > Updated:', results[ij].code, word, results[ij].pos, results[ij].pos_position, rslt)
       var sql = "UPDATE pos_stats SET pos_occurance='" + rslt + "' WHERE code='" + results[ij].code + "' AND pos='" + results[ij].pos + "' AND pos_position='" + results[ij].pos_position + "' AND word='" + word + "'";
       sqlStore(sql);

@@ -7,14 +7,14 @@ services:
     image: harbor.ivv.io:80/ardi/discord:latest
     ports:
       - "3050:3050"
-    command: ["./wait-for-it.sh", "ardi_redis:6379", "--", "node", "discord.js"]
+    command: ["./wait-for-it.sh", "redis_redis:6379", "--", "node", "discord.js"]
     healthcheck:
         test: ["CMD", "node", "./healthcheck.js"]
         interval: 12s
         timeout: 5s
         retries: 2
     networks:
-      - backend
+      - ardi_backend
 
   sort:
     deploy:
@@ -22,14 +22,14 @@ services:
     image: harbor.ivv.io:80/ardi/sort:latest
     ports:
       - "3051:3051"
-    command: ["./wait-for-it.sh", "ardi_redis:6379", "--", "node", "sort.js"]
+    command: ["./wait-for-it.sh", "redis_redis:6379", "--", "node", "sort.js"]
     healthcheck:
         test: ["CMD", "node", "./healthcheck.js"]
         interval: 12s
         timeout: 5s
         retries: 2
     networks:
-      - backend
+      - ardi_backend
 
   classify:
     deploy:
@@ -37,14 +37,14 @@ services:
     image: harbor.ivv.io:80/ardi/classify:latest
     ports:
       - "3052-3052"
-    command: ["./wait-for-it.sh", "ardi_redis:6379", "--", "node", "classify.js"]
+    command: ["./wait-for-it.sh", "redis_redis:6379", "--", "node", "classify.js"]
     healthcheck:
         test: ["CMD", "node", "./healthcheck.js"]
         interval: 12s
         timeout: 5s
         retries: 2
     networks:
-      - backend
+      - ardi_backend
 
   respond:
     deploy:
@@ -52,61 +52,31 @@ services:
     image: harbor.ivv.io:80/ardi/respond:latest
     ports:
       - "3053-3053"
-    command: ["./wait-for-it.sh", "ardi_redis:6379", "--", "node", "respond.js"]
+    command: ["./wait-for-it.sh", "redis_redis:6379", "--", "node", "respond.js"]
     healthcheck:
         test: ["CMD", "node", "./healthcheck.js"]
         interval: 12s
         timeout: 5s
         retries: 2
     networks:
-      - backend
+      - ardi_backend
   
   process:
     deploy:
-      replicas: 2
+      replicas: 3
     image: harbor.ivv.io:80/ardi/process:latest
     ports:
       - "3054-3054"
-    command: ["./wait-for-it.sh", "ardi_redis:6379", "--", "node", "process.js"]
+    command: ["./wait-for-it.sh", "redis_redis:6379", "--", "node", "process.js"]
     healthcheck:
         test: ["CMD", "node", "./healthcheck.js"]
         interval: 12s
         timeout: 5s
         retries: 2
     networks:
-      - backend
-
-  redis:
-    deploy:
-      placement:
-        constraints:
-            - "node.role==manager"
-    volumes:
-      - "/srv/docker/redis:/data"
-    ports:
-      - "6379:6379"
-    hostname: redis
-    image: redis
-    networks:
-      - backend
-
-  redis-commander:
-    deploy:
-      placement:
-        constraints:
-            - "node.role==manager"
-    hostname: redis-commander
-    image: rediscommander/redis-commander:latest
-    restart: always
-    environment:
-    - REDIS_HOSTS=ardi_redis:redis:6379
-    ports:
-    - "8081:8081"
-    networks:
-      - backend
-
+      - ardi_backend
 
 networks:
-  backend:
-      # Use a custom driver which takes special options
-    driver: overlay
+  ardi_backend:
+    external:
+      name: ardi_backend

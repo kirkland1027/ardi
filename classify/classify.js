@@ -119,46 +119,19 @@ app.post('/', (req, res) => {
         client.hset(uuid, 'code', code.toString());
         client.expire(uuid, 30);
         if (env.CONSOLE_LOG){ console.log(`[SUCCESS] > message CODE: ${code}`) }
-        if (code.includes('Q')){ //if the input is a question, store the string as a question.
-            var sqlQ = "INSERT INTO q (data, pos, length) VALUES ('" + sentence + "', '" + posString + "', '" + codes.length + "')";
-            sqlStore(sqlQ);
-            processNotify(uuid, 'Q');
-            var sqlPos = "SELECT * from pos WHERE uuid='" + uuid + "'";
-            sqlQuery(sqlPos, function(err, results){
-                if (err) console.error(err);
-                for (var xi=0;results.length>xi;xi++){
-                    var sqlQcode = "UPDATE pos SET code='Q' WHERE id='" + results[xi].id +"'";
-                    sqlStore(sqlQcode);
-                }
-            }) 
-        }
-        if(code.includes('PR')){
-            var sqlQ = "INSERT INTO pr (data, pos, length) VALUES ('" + sentence + "', '" + posString + "', '" + codes.length + "')";
-            sqlStore(sqlQ);
-            processNotify(uuid, 'PR');
-            var sqlPos = "SELECT * from pos WHERE uuid='" + uuid + "'";
-            sqlQuery(sqlPos, function(err, results){
-                if (err) console.error(err);
-                for (var xi=0;results.length>xi;xi++){
-                    var sqlQcode = "UPDATE pos SET code='PR' WHERE id='" + results[xi].id +"'";
-                    sqlStore(sqlQcode);
-                }
-            })
-        }
-        if(code.includes('NR')){
-            var sqlQ = "INSERT INTO nr (data, pos, length) VALUES ('" + sentence + "', '" + posString + "', '" + codes.length + "')";
-            sqlStore(sqlQ);
-            processNotify(uuid, 'NR');
-            var sqlPos = "SELECT * from pos WHERE uuid='" + uuid + "'";
-            sqlQuery(sqlPos, function(err, results){
-                if (err) console.error(err);
-                for (var xi=0;results.length>xi;xi++){
-                    var sqlQcode = "UPDATE pos SET code='NR' WHERE id='" + results[xi].id +"'";
-                    sqlStore(sqlQcode);
-                }
-            })
-        }
 
+        var tableCode = codes.join('-');
+        var sqlQ = "INSERT INTO coding (data, pos, length, code) VALUES ('" + sentence + "', '" + posString + "', '" + taggedWords.length + "', '" + tableCode + "')";
+        sqlStore(sqlQ);
+        processNotify(uuid, tableCode, tableCode)
+        var sqlPos = "SELECT * from pos WHERE uuid='" + uuid + "'";
+        sqlQuery(sqlPos, function(err, results){
+            if (err) console.error(err);
+            for (var xi=0;results.length>xi;xi++){
+                var sqlQcode = "UPDATE pos SET code='" + tableCode + "' WHERE id='" + results[xi].id +"'";
+                sqlStore(sqlQcode);
+            }
+        })
     });
 
 // return a text response
@@ -172,10 +145,6 @@ app.post('/', (req, res) => {
 
     res.json(data);
 });
-
-//function to store sql information
-
-
 
 function getReddisCount(className, sentence){
     return new Promise((resolve, reject) => {
@@ -219,6 +188,9 @@ function sqlStore(sql){
         connection.release();
     })
 }
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 //API call to the logic app to notify it a decision needs to be made, including the hash, uuid and options
 function notify(uuid, sentence, code){
@@ -234,11 +206,12 @@ function notify(uuid, sentence, code){
     });
 }
 
-function processNotify(uuid, className){
+function processNotify(uuid, className, code){
     axios.post(process.env.PROCESS + token, {
         headers: {
         id: uuid,
-        did: className
+        did: className,
+        codes: code
         }
     })
     .catch(error => {

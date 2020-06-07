@@ -25,7 +25,7 @@ client.on('connect', function(){
     //load rules for responding
 });
 // start the webhook
-app.listen(3053, () => console.log(`[SUCCESS] [Ardi PROCESS ${env.VER}] Webhook is listening`));
+app.listen(3053, () => console.log(`[SUCCESS] [Ardi RESPOND ${env.VER}] Webhook is listening`));
 
 //l1db01 mySQL
 var sqlPool = mysql.createPool({
@@ -91,10 +91,11 @@ function removeRules(){
 function beginRespond(uuid){
     client.hgetall(uuid, async function(err, results){ //getting message codes from redis
         var codes = results.code.split(',');
+        var sCode = results.code.split('-');
         if (codes.includes('P-T')){ //if the code has a target, we need to validate if we should respond (ex. everyone)
             var resp_tgt = await respondTarget(uuid);
             //adding code 'XJ' as a placeholder for the need to respond.
-            if (resp_tgt) codes.push('XJ');
+            if (resp_tgt) codes.push('P');
         }
         var facts = { code: codes, id: results.cid };
         //running code against the rules engine
@@ -140,8 +141,8 @@ function buildResponce(rCode, statusCheck){
                 if (getStatusRslt){
                     var sql = "SELECT top_pos FROM code_stats WHERE code='" + rCode + "'"
                 } else {
-                    var sql = "SELECT top_pos FROM code_stats WHERE code='NR'"
-                    rCode = 'NR'
+                    var sql = "SELECT top_pos FROM code_stats WHERE code='I-NR-PR-R'"
+                    rCode = 'I-NR-PR-R'
                 }
         } else{
             var sql = "SELECT top_pos FROM code_stats WHERE code='" + rCode + "'";
@@ -178,13 +179,30 @@ function getRspWord(rCode, pos, xg){
 
 async function getStatus(){
     return new Promise(async (resolve, reject) => {
-        var discord = await axios.get(process.env.DISCORD + process.env.TOKEN);
-        var sort = await axios.get(process.env.SORT + process.env.TOKEN);
-        var classify = await axios.get(process.env.CLASSIFY + process.env.TOKEN);
+        try {
+            var discord = await axios.get(process.env.DISCORD + process.env.TOKEN);
+        } catch {
+            console.error('[ERROR] > ARDI DISCORD IS OFFLINE!');
+            var discord = [];
+            discord['status'] = 401
+        }
+        try {
+            var sort = await axios.get(process.env.SORT + process.env.TOKEN);
+        } catch{
+            console.error('[ERROR] > ARDI SORT IS OFFLINE!');
+            var sort = [];
+            sort['status'] = 401
+        }
+        try{
+            var classify = await axios.get(process.env.CLASSIFY + process.env.TOKEN);
+        } catch {
+            console.error('[ERROR] > ARDI CLASSIFY IS OFFLINE!');
+            var classify = [];
+            classify['status'] = 401
+        }
         try {
             var processApp = await axios.get(process.env.PROCESS + process.env.TOKEN);
-        }
-        catch(error){
+        } catch(error){
             console.error('[ERROR] > ARDI PROCESS IS OFFLINE!');
             var processApp = [];
             processApp['status'] = 401;

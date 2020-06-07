@@ -1,0 +1,35 @@
+version: '3'
+
+services:
+  redis:
+    deploy:
+      placement:
+        constraints:
+            - "node.role==manager"
+    volumes:
+      - "/srv/docker/redis:/data"
+    ports:
+      - "6379:6379"
+    hostname: redis
+    image: redis
+    networks:
+      - ardi_backend
+
+  redis-commander:
+    deploy:
+      placement:
+        constraints:
+            - "node.role==manager"
+    hostname: redis-commander
+    image: rediscommander/redis-commander:latest
+    restart: always
+    environment:
+    - REDIS_HOSTS=redis_redis:redis:6379
+    ports:
+    - "8081:8081"
+    networks:
+      - ardi_backend
+networks:
+  ardi_backend:
+    external:
+      name: ardi_backend

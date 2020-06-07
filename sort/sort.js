@@ -47,13 +47,6 @@ app.post('/', (req, res) => {
         console.log('401');
         return res.sendStatus(401);
     }
-    // if (req.body.headers.action === 'class'){
-    //     var classification = req.body.headers.type;
-    //     var uid = req.body.headers.id;
-    //     var sql = "UPDATE lang SET class='" + classification + "' WHERE uuid='" + uid + "'";
-    //     sqlStore(sql);
-
-    // }
     
     if (req.body.headers.action === 'message'){
         var sender = req.body.headers.author;
@@ -68,8 +61,7 @@ app.post('/', (req, res) => {
         sqlStore(sql);
         notify(message, uuid)
         client.hset(uuid, 'message', refinedMessage, 'guid', userid, 'cid', cid, 'timestamp', date);
-        client.expire(uuid, 240);
-        //client.rpush([cid, uuid])
+        client.expire(uuid, 30);
     }
     if (req.body.headers.action === 'block'){
         var uuid = guid.v4.call();
@@ -79,7 +71,6 @@ app.post('/', (req, res) => {
         sqlStore(sql);
         client.rpush(['blocked_user', userID]);
         console.log('[ALERT] User blocked:', sender, userID);
-        
     }
     if (req.body.headers.action === 'unblock'){
         var uuid = guid.v4.call();

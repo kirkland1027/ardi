@@ -25,7 +25,7 @@ let conditions = {
     ]
 }
 
-  let rule = new RuleEngine.Rule(conditions, event);
+  let rule = new RuleEngine.Rule({ conditions, event });
 
   //engine.addRule(rule);
 

@@ -18,24 +18,14 @@ var NGrams = natural.NGrams;
 var token = env.TOKEN;
 var client = redis.createClient(6379, env.REDIS); //creates a new client
 
+// reddis connection - pull in rules for responding
 client.on('connect', function(){
     console.log(`[SUCCESS] > Reddis Connected: ${process.env.REDIS}`);
     console.log(`[SUCCESS] > SQL DB: ${process.env.ARDI_DB}`);
     //load rules for responding
-    client.smembers('rules', function(err, results){
-        if (err) console.error(err);
-        for (var ri=0;results.length>ri;ri++){
-            client.get(results[ri], function(err, result){
-                //var rule = result.toJSON();
-                let rule = new RuleEngine.Rule(result);
-                engine.addRule(rule);
-            })
-        }
-    })
 });
 // start the webhook
 app.listen(3053, () => console.log(`[SUCCESS] [Ardi PROCESS ${env.VER}] Webhook is listening`));
-
 
 //l1db01 mySQL
 var sqlPool = mysql.createPool({
@@ -63,8 +53,8 @@ app.post('/', (req, res) => {
     }
 
     var uuid = req.body.headers.id;
+    loadRules();
     beginRespond(uuid);
-    
 
 // return a text response
     const data = {
@@ -78,41 +68,49 @@ app.post('/', (req, res) => {
     res.json(data);
 });
 
+//load rules on each call, so rules can be changed dynamically
+function loadRules(){
+    client.smembers('rules', function(err, results){
+        if (err) console.error(err);
+        for (var ri=0;results.length>ri;ri++){
+            client.get(results[ri], function(err, result){
+                let rule = new RuleEngine.Rule(result);
+                engine.addRule(rule);
+            })
+        }
+    })
+}
+//remove rules after each respond
+function removeRules(){
+    engine.rules.forEach((rule, idx) => {
+        delete engine.rules[idx];
+        engine.prioritizedRules = null;
+    })
+}
+
 function beginRespond(uuid){
-    client.hgetall(uuid, async function(err, results){
+    client.hgetall(uuid, async function(err, results){ //getting message codes from redis
         var codes = results.code.split(',');
-        //checking if we should respond to this.
-        if (codes.includes('T')){
+        if (codes.includes('P-T')){ //if the code has a target, we need to validate if we should respond (ex. everyone)
             var resp_tgt = await respondTarget(uuid);
+            //adding code 'XJ' as a placeholder for the need to respond.
             if (resp_tgt) codes.push('XJ');
         }
         var facts = { code: codes, id: results.cid };
+        //running code against the rules engine
         engine.run(facts).then(function(success){
             success.events.forEach(async (item) => {
                 var statusCheck = false;
                 if (item.type === 'respond-Status') statusCheck = true;
                 var action = item.params.action;
                 var rply = await buildResponce(action, statusCheck);
-                notify(rply, results.cid)
+                notify(rply, results.cid);
+                
             })
-             
+            removeRules();
         })
          
     })
-}
-
-//notify discord app of response. 
-function notify(response, channel){
-    axios.post(process.env.DISCORD + token, {
-        headers: {
-        action: "reply",
-        data: response,
-        target: channel
-        }
-    })
-    .catch(error => {
-        console.error(error)
-    });
 }
 
 //function to determine if we should respond. 
@@ -120,7 +118,7 @@ function respondTarget(uuid){
     return new Promise((resolve, reject) => {
         client.smembers('response_targets', function(err, results){
             if (err) console.error(err);
-            var sql = "SELECT data FROM codes WHERE code='T' AND uuid='" + uuid + "'";
+            var sql = "SELECT data FROM codes WHERE code='P-T' AND uuid='" + uuid + "'";
             sqlQuery(sql, function(err, responces){
                 if (err) console.error(err);
                 for (var i=0;responces.length>i;i++){
@@ -134,7 +132,6 @@ function respondTarget(uuid){
     })
     
 }
-
 
 function buildResponce(rCode, statusCheck){
     return new Promise (async (resolve, reject)=>{
@@ -226,5 +223,19 @@ function sqlQuery(sql, callback) {
           }
       });
   });
+}
+
+//notify discord app of response. 
+function notify(response, channel){
+    axios.post(process.env.DISCORD + token, {
+        headers: {
+        action: "reply",
+        data: response,
+        target: channel
+        }
+    })
+    .catch(error => {
+        console.error(error)
+    });
 }
 

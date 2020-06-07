@@ -91,7 +91,7 @@ app.post('/', (req, res) => {
     sqlStore(posSql);
     client.hset(uuid, 'pos', posString.toString());
     client.hset(uuid, 'words', wordString.toString());
-    client.expire(uuid, 600);
+    client.expire(uuid, 30);
     if (env.CONSOLE_LOG){ console.log(`[SUCCESS] > message POS: ${posString.toString()}`) }
     
     //getting the members of the "class list type from redis"
@@ -117,7 +117,7 @@ app.post('/', (req, res) => {
         sqlStore(sqlCode);
         notify(uuid, sentence, code);
         client.hset(uuid, 'code', code.toString());
-        client.expire(uuid, 600);
+        client.expire(uuid, 30);
         if (env.CONSOLE_LOG){ console.log(`[SUCCESS] > message CODE: ${code}`) }
         if (code.includes('Q')){ //if the input is a question, store the string as a question.
             var sqlQ = "INSERT INTO q (data, pos, length) VALUES ('" + sentence + "', '" + posString + "', '" + codes.length + "')";
